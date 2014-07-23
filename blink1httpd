@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+
+import sys
+import os
+import atexit
+import logging
+import argparse
+from bottle import json_loads, route, request, response, abort, run
+from blink1lib import Blink1
+
+
+__version_info__ = (0, 1, 1)
+__version__ = ".".join(map(str, __version_info__))
+
+
+foreground = False
+
+
+def _load_conf(file_name, default=None):
+    paths = []
+
+    if foreground:
+        paths.append(os.path.abspath(file_name))
+
+    paths.append(os.path.join("/etc/blink1httpd", file_name))
+
+    for path in paths:
+        if os.access(path, os.R_OK):
+            return json_loads(open(path, "r").read())
+
+    return default
+
+
+class Arg(object):
+
+    def __init__(self, type, dest=None, default=None, range=None):  # pylint: disable=W0622
+        super(Arg, self).__init__()
+
+        self.type = type
+        self.dest = dest
+        self.default = default
+        self.range = range
+
+
+def parse_args(func):
+    schema = {
+        "r": Arg(type=int, range=(0, 255)),
+        "g": Arg(type=int, range=(0, 255)),
+        "b": Arg(type=int, range=(0, 255)),
+        "f": Arg(type=int, dest="fading", range=(0, 0xFFFF)),
+        "d": Arg(type=int, dest="delay", range=(0, 0xFFFF)),
+        "c": Arg(type=int, dest="count", range=(0, 0xFFFF)),
+        "l": Arg(type=int, dest="led", range=(1, 2)),
+    }
+
+    def invalid(arg):
+        abort(400, "invalid argument '{}'".format(arg))
+
+    def wrapper(*args, **kwargs):
+        rgb = {}
+
+        for k, v in request.query.items():
+            arg = schema.get(k)
+
+            if not arg:
+                continue
+
+            try:
+                v = arg.type(v)
+            except ValueError:
+                invalid(k)
+
+            if arg.range:
+                le, ge = arg.range
+
+                if v < le or v > ge:
+                    invalid(k)
+
+            k = arg.dest or k
+
+            if k in ("r", "g", "b"):
+                rgb[k] = v
+            else:
+                kwargs[k] = v
+
+        kwargs["rgb"] = tuple(rgb.get(x, 0) for x in ("r", "g", "b")) if rgb else None
+
+        for k, arg in schema.items():
+            kwargs.setdefault(arg.dest or k, arg.default)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+@route("/blink1/devices")
+def blink1_devices():
+    names = {}
+
+    for k, v in _load_conf("devices.json", {}).items():
+        if v in names:
+            names[v].append(k)
+        else:
+            names[v] = [k, ]
+
+    try:
+        devices = Blink1.devices()
+    except RuntimeError:
+        abort(500)
+
+    lines = []
+
+    for _, serial, _ in devices:
+        serial = serial.decode("ascii")
+
+        if serial in names:
+            lines.append("{} ({})".format(serial, ", ".join(names[serial])))
+        else:
+            lines.append(serial)
+
+    response.content_type = "text/plain; charset=utf-8"
+
+    return "\n".join(lines)
+
+
+def _blink1(name, method, **kwargs):
+    devices = _load_conf("devices.json", {})
+    serial = devices.get(name, name)
+    blink1 = Blink1(serial=serial)
+
+    try:
+        blink1.mk_version()
+    except RuntimeError:
+        abort(404)
+
+    func = getattr(blink1, method)
+    return func(**{k: v for k, v in kwargs.items() if v is not None})
+
+
+@route("/blink1/<name>/on")
+@parse_args
+def blink1_on(name, rgb, fading, led, **_):
+    _blink1(name, "on", rgb=rgb, fading=fading, led=led)
+
+
+@route("/blink1/<name>/off")
+@parse_args
+def blink1_off(name, fading, led, **_):
+    _blink1(name, "off", fading=fading, led=led)
+
+
+@route("/blink1/<name>/blink")
+@parse_args
+def blink1_blink(name, rgb, fading, delay, count, **_):
+    _blink1(name, "play_blink", rgb=rgb, fading=fading, delay=delay, count=count)
+
+
+@route("/blink1/<name>/play/<pattern>")
+@parse_args
+def blink1_play(name, pattern, count, **_):
+    patterns = _load_conf("patterns.json")
+
+    if patterns is None:
+        abort(500)
+
+    try:
+        seq = patterns[pattern]
+    except KeyError:
+        abort(404)
+
+    _blink1(name, "play_seq", seq=seq, count=count)
+
+
+@route("/blink1/<name>/stop")
+def blink1_stop(name):
+    _blink1(name, "stop")
+
+
+def daemonize(pidfile, stdout, stderr):
+    # do the UNIX double-fork magic, see Stevens' "Advanced
+    # Programming in the UNIX Environment" for details (ISBN 0201563177)
+    # http://www.erlenstar.demon.co.uk/unix/faq_2.html#SEC16
+    try:
+        pid = os.fork()
+    except OSError as e:
+        sys.stderr.write("fork #1 failed: {} (errno: {})\n".format(e.strerror, e.errno))
+        sys.exit(1)
+
+    if pid > 0:
+        sys.exit(0)
+
+    # decouple from parent environment
+    os.chdir("/")
+    os.setsid()
+    os.umask(0)
+
+    try:
+        pid = os.fork()
+    except OSError as e:
+        sys.stderr.write("fork #2 failed: {} (errno: {})\n".format(e.strerror, e.errno))
+        sys.exit(1)
+
+    if pid > 0:
+        sys.exit(0)
+
+    # redirect standard file descriptors
+    si = open("/dev/null", "rb")
+    os.dup2(si.fileno(), sys.stdin.fileno())
+
+    sys.stdout.flush()
+    so = open(stdout, "a+b")
+    os.dup2(so.fileno(), sys.stdout.fileno())
+
+    sys.stderr.flush()
+    se = open(stderr, "a+b", 0)
+    os.dup2(se.fileno(), sys.stderr.fileno())
+
+    if pidfile:
+        atexit.register(lambda: os.remove(pidfile))
+        open(pidfile, "w").write("{}\n".format(os.getpid()))
+
+
+def main(argv=sys.argv):
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(argv[0]),
+        description="Blink(1) http server daemon v{}".format(__version__),
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version="%(prog)s v{}".format(__version__),
+    )
+    parser.add_argument(
+        "-H", "--host",
+        default="localhost",
+        type=str,
+        help="HTTP server host (default: localhost)",
+    )
+    parser.add_argument(
+        "-p", "--port",
+        default=8050,
+        type=int,
+        help="HTTP server port (default: 8060)",
+    )
+    parser.add_argument(
+        "-f", "--foreground",
+        action="store_true",
+        help="do not detach from the shell",
+    )
+    parser.add_argument(
+        "-P", "--pid-file",
+        default="/var/run/blink1httpd.pid",
+        type=str,
+        metavar="FILE",
+        help=("pid file path (default: /var/run/blink1httpd.pid, "
+              "not available in foreground mode)"),
+    )
+    parser.add_argument(
+        "-o", "--stdout",
+        default="/var/log/blink1httpd.log",
+        type=str,
+        metavar="FILE",
+        help="redirect stdout to file (not available in foreground mode)",
+    )
+    parser.add_argument(
+        "-e", "--stderr",
+        default="/var/log/blink1httpd.log",
+        type=str,
+        metavar="FILE",
+        help="redirect stderr to file (not available in foreground mode)",
+    )
+    parser.add_argument(
+        "-d", "--debug",
+        action="store_true",
+        help="enable debug messages",
+    )
+    args = parser.parse_args(argv[1:])
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(levelname)s [%(asctime)s] %(message)s",
+    )
+
+    global foreground  # pylint: disable=W0603
+    foreground = args.foreground
+
+    if not foreground:
+        daemonize(args.pid_file, args.stdout, args.stderr)
+
+    run(host=args.host, port=args.port, debug=args.debug)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

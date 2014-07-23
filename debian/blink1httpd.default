@@ -1,0 +1,13 @@
+# Defaults for blink1httpd initscript
+# sourced by /etc/init.d/blink1httpd
+# installed at /etc/default/blink1httpd by the maintainer scripts
+
+#
+# This is a POSIX shell fragment
+#
+
+# Set to yes to start blink1httpd
+RUN=no
+
+# Additional options that are passed to the Daemon.
+DAEMON_OPTS=""

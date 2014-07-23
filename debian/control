@@ -1,0 +1,12 @@
+Source: blink1httpd
+Section: net
+Priority: optional
+Maintainer: Alexander Gordeyev <s0meuser@yandex.ru>
+Build-Depends: debhelper (>= 9)
+Standards-Version: 3.9.5
+Homepage: https://github.com/Shura1oplot/blink1httpd/
+
+Package: blink1httpd
+Architecture: any
+Depends: ${misc:Depends}, python3, python3-bottle, python3-blink1lib
+Description: blink(1) http server daemon

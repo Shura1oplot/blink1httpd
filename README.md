@@ -2,7 +2,7 @@ blink(1) http server daemon
 ===========================
 
 Simple http server built using [bottle](http://bottlepy.org/) web framework.
-It allows you to control [blink(1)](http://thingm.com/products/blink-1/) remotely using shell scripts (wget, curl), web browser, IFTTT callbacks or everything that can send http requests.
+It allows you to control [blink(1)](http://thingm.com/products/blink-1/) remotely using shell scripts (wget, curl), web browser, [Zapier](https://zapier.com/) callbacks or everything that can send http requests.
 It requires [python3-blink1lib](https://github.com/Shura1oplot/python3-blink1lib/) to be installed.
 
 Usage

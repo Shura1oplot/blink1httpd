@@ -12,14 +12,14 @@ Usage
 usage: blink1httpd [-h] [-v] [-H HOST] [-p PORT] [-f] [-P FILE] [-o FILE]
                    [-e FILE] [-d]
 
-Blink(1) http server daemon v0.1.1
+Blink(1) http server daemon v0.1.2
 
 optional arguments:
   -h, --help            show this help message and exit
   -v, --version         show program's version number and exit
   -H HOST, --host HOST  HTTP server host (default: localhost)
   -p PORT, --port PORT  HTTP server port (default: 8060)
-  -f, --foreground      do not detach from the shell
+  -f, --foreground      do not detach from the terminal
   -P FILE, --pid-file FILE
                         pid file path (default: /var/run/blink1httpd.pid, not
                         available in foreground mode)
@@ -38,16 +38,18 @@ Supported pathes:
 * `/blink1/<name>/off?fading=<fading>&led=<led>`
 * `/blink1/<name>/blink?r=<red>&g=<green>&b=<blue>&fading=<fading>&delay=<delay>&count=<count>`
 * `/blink1/<name>/play/<pattern>?count=<count>`
+* `/blink1/<name>/playseq/<sequence>?count=<count>`
 * `/blink1/<name>/stop`
 
 Where:
 * `<name>` - serial number or name from `devices.json`
 * `<pattern>` - patterns sequence name from `patterns.json`
+* `<sequence>` - RRGGBB,fading;RRGGBB,fading;... (example: FF0000,500;00FF00,500;0000FF,500)
 * `<red>`, `<green>`, `<blue>` - color value between 0 and 255
-* `fading` - millisecs for color fading
-* `led` - specify led to use (omit to use both)
-* `delay` - millisecs between changing colors
-* `count` - how many times device blinks or plays `<pattern>` (infinity if omitted)
+* `<fading>` - millisecs for color fading
+* `<led>` - specify led to use (omit to use both)
+* `<delay>` - millisecs between changing colors
+* `<count>` - how many times device blinks or plays `<pattern>` (infinity if omitted)
 
 All arguments are optional. For more information see [python3-blink1lib](https://github.com/Shura1oplot/python3-blink1lib/).
 

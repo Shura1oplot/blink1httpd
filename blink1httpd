@@ -9,7 +9,7 @@ from bottle import json_loads, route, request, response, abort, run
 from blink1lib import Blink1
 
 
-__version_info__ = (0, 1, 1)
+__version_info__ = (0, 1, 2)
 __version__ = ".".join(map(str, __version_info__))
 
 
@@ -33,7 +33,7 @@ def _load_conf(file_name, default=None):
 
 class Arg(object):
 
-    def __init__(self, type, dest=None, default=None, range=None):  # pylint: disable=W0622
+    def __init__(self, type, dest=None, default=None, range=None):
         super(Arg, self).__init__()
 
         self.type = type
@@ -53,8 +53,16 @@ def parse_args(func):
         "l": Arg(type=int, dest="led", range=(1, 2)),
     }
 
+    def quote(s):
+        c = "'" if "'" not in s or '"' in s else '"'
+        escape = {"\0": "\\0", "\a": "\\a", "\b": "\\b", "\t": "\\t",
+                  "\n": "\\n", "\v": "\\v", "\f": "\\f", "\r": "\\r",
+                  "\\": "\\\\"}
+        escape[c] = "\\{}".format(c)
+        return "".join((c, "".join(escape.get(c, c) for c in s), c))
+
     def invalid(arg):
-        abort(400, "invalid argument '{}'".format(arg))
+        abort(400, "invalid argument {}".format(quote(arg)))
 
     def wrapper(*args, **kwargs):
         rgb = {}
@@ -129,7 +137,7 @@ def _blink1(name, method, **kwargs):
     blink1 = Blink1(serial=serial)
 
     try:
-        blink1.mk_version()
+        blink1.mk_version
     except RuntimeError:
         abort(404)
 
@@ -167,6 +175,26 @@ def blink1_play(name, pattern, count, **_):
         seq = patterns[pattern]
     except KeyError:
         abort(404)
+
+    _blink1(name, "play_seq", seq=seq, count=count)
+
+
+@route("/blink1/<name>/playseq/<sequence>")
+@parse_args
+def blink1_playseq(name, sequence, count, **_):
+    seq = []
+
+    for pattern in sequence.split(";"):
+        try:
+            rgb, fading = pattern.split(",", 1)
+            red = int(rgb[0:2], 16)
+            green = int(rgb[2:4], 16)
+            blue = int(rgb[4:6], 16)
+            fading = int(fading)
+        except ValueError:
+            abort(400)
+
+        seq.append((red, green, blue, fading))
 
     _blink1(name, "play_seq", seq=seq, count=count)
 
@@ -245,7 +273,7 @@ def main(argv=sys.argv):
     parser.add_argument(
         "-f", "--foreground",
         action="store_true",
-        help="do not detach from the shell",
+        help="do not detach from the terminal",
     )
     parser.add_argument(
         "-P", "--pid-file",
@@ -281,7 +309,7 @@ def main(argv=sys.argv):
         format="%(levelname)s [%(asctime)s] %(message)s",
     )
 
-    global foreground  # pylint: disable=W0603
+    global foreground
     foreground = args.foreground
 
     if not foreground:
